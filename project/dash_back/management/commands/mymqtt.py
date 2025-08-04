@@ -66,7 +66,7 @@ class Command(BaseCommand):
             client.subscribe("init/#")
             #client.subscribe("err/#")
             client.subscribe("forecast/#")   
-            client.subscribe("siko/#")          
+               
             
 
         def on_message(client, userdata, msg):
@@ -77,42 +77,6 @@ class Command(BaseCommand):
             myList = topic.split('/')               
             sm_coeff = [{"sm-0001":120},{"sm-0002":320},{"sm-0003":400},{"sm-0004":200},{"sm-0006":200},{"sm-0008":200},{"sm-0009":80},
                         {"sm-0010":60},{"sm-0011":60},{"sm-0015":60},{"sm-0016":250},{"sm-0017":200},{"sm-0018":400},{"sm-0019":500},{"sm-0020":500},{"sm-0025":200}]
-            
-
-            if myList[0] == 'siko':
-                
-                try:
-                    message = msg.payload.decode('utf-8')
-                    parsed = parse_mqtt_payload(message=message)
-                    local_tz = pytz.timezone('Europe/Sofia')
-                    local_time = datetime.now(local_tz).replace(second=0, microsecond=0)
-                    timestamp_str = local_time.strftime('%Y-%m-%dT%H:%M:%SZ')                   
-                    # Set of devIds to skip
-                    excluded_devs = {'sm-58', 'sm-59', 'sm-60'}                 
-
-                    for devId, value in parsed.items():
-                        if devId not in excluded_devs:
-                            if not Post.objects.filter(devId=devId, created_date=timestamp_str).exists():
-                                # Create and save the Post object if it doesn't exist
-                                Post.objects.create(
-                                    devId=devId,
-                                    created_date=timestamp_str,
-                                    value=value
-                                )
-                            if not Online.objects.filter(dev=devId, saved_date=timestamp_str).exists():
-                                Online.objects.create(
-                                    dev=devId,
-                                    saved_date=timestamp_str,
-                                    pow=value
-                                )
-                            else:
-                                print(f"Post with devId {devId} and timestamp {timestamp_str} already exists.")                      
-
-                   
-                except UnicodeDecodeError as e:
-                    print("Decode error:", e)        
-
-
 
             if myList[0] == 'data':
                 dev_id = myList[1]                 
