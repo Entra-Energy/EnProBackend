@@ -114,7 +114,7 @@ def resample_today_task(device_id=None, interval='15min'):
             result.append({
                 'devId': dev_id,
                 'created': ts.isoformat(),
-                'value': round(row['value'], 2) if row['value'] is not None else None
+                'value': None if pd.isna(row['value']) else round(row['value'], 2)
             })
 
     # Store result in cache
