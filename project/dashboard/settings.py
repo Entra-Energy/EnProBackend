@@ -133,20 +133,6 @@ CELERY_RESULT_BACKEND = os.environ.get("CELERY_BACKEND", "redis://redis:6379/0")
 
 CELERY_BEAT_SCHEDULE = {
 
-#     'task_schedule_it': {
-#       'task': 'dash_back.tasks.task_schedule',
-#       'schedule': crontab(),
-#   },
-    # 'task_hydro_data':{
-    #     'task':'dash_back.tasks.task_hydro',
-    #     'schedule': crontab(),
-    # },       
-
-    # 'execute_task_fill_prices_dam':{
-    #     'task': 'dash_back.tasks.task_fill_prices_dam',
-    #     'schedule': crontab(hour=14, minute=30),
-
-    # }, 
 
     'task_set_rtc':{
         'task':'dash_back.tasks.task_setTime',
@@ -160,50 +146,33 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'dash_back.tasks.task_command_run',
         'schedule': crontab(hour=17, minute=18),
     },
-    'task_query_month_all':{
-        'task': 'dash_back.tasks.slow_query_all_devs_month_task',
-        'schedule': crontab(minute="*/15")
+    'resample_today_all_devices': {
+        'task': 'dash_back.tasks.resample_today_data',
+        'schedule': crontab(minute='*/5'),  # every 5 minutes
+        'args': [],  # no device_id = resample for all devices
+        'kwargs': {
+            'device_id': None,
+            'interval': '15min'
+        }
     },
-    'task_query_year_all':{
-        'task': 'dash_back.tasks.slow_query_all_devs_year_task',
-        'schedule': crontab(minute="*/15")
-    },
-    
 
-    # 'task_populate_missing_data':{
-    #     'task':'dash_back.tasks.populate_missing_task',
-    #     'schedule': crontab()
-    # },
-    # 'task_resample_at_15_min_data':{
-    # 'task':'dash_back.tasks.resample_at_15_min_task',
-    # 'schedule': crontab()
-    # },
-    # 'task_resample_at_30_min_data':{
-    # 'task':'dash_back.tasks.resample_at_30_min_task',
-    # 'schedule': crontab()
-    # },
-    # 'task_resample_at_45_min_data':{
-    # 'task':'dash_back.tasks.resample_at_45_min_task',
-    # 'schedule': crontab()
-    # },
-    # 'task_resample_at_60_min_data':{
-    # 'task':'dash_back.tasks.resample_at_60_min_task',
-    # 'schedule': crontab()
-    # },
-
-    
-
-
-
+  
 }
 
 CACHES = {
     'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://redis:6379/1',
+        #'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    },
+    'database': {
         'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-        'LOCATION': 'my_cache_table',  # Set the cache table name
+        'LOCATION': 'my_cache_table',
     }
 }
-
 CELERY_TIMEZONE = 'Europe/Sofia'
 
 # Password validation
