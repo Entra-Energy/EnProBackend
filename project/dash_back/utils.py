@@ -25,6 +25,7 @@ from django.utils.timezone import now
 import logging
 logger = logging.getLogger(__name__)
 import subprocess
+from collections import defaultdict
 
 
      
@@ -104,23 +105,23 @@ def resample_today_task(device_id=None, interval='15min'):
     time_axis = pd.date_range(start=min_time, end=max_time, freq=interval)
 
     # Resample and pad each device
-    result = []
+    result = defaultdict(list)
     for dev_id in df['devId'].unique():
         dev_df = df[df['devId'] == dev_id].set_index('created')
         dev_df = dev_df[['value']].resample(interval).mean()
         dev_df = dev_df.reindex(time_axis)
 
         for ts, row in dev_df.iterrows():
-            result.append({
-                'devId': dev_id,
-                'created': ts.isoformat(),
-                'value': None if pd.isna(row['value']) else round(row['value'], 2)
-            })
+            result[dev_id].append([
+            ts.isoformat(),
+            None if pd.isna(row['value']) else round(row['value'], 2)
+        ])
 
     # Store result in cache
     cache_key = f"resampled_today:{device_id or 'all'}:{interval}"
     cache.set(cache_key, result, timeout=60 * 15)  # Cache for 15 minutes
 
-    return result
+    return dict(result)
+
 
 
