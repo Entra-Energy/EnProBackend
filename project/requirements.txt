@@ -14,5 +14,6 @@ django-filter
 requests
 paho-mqtt==1.6.1
 pytz
+django-redis
 #numpy==1.19.5
 #python-dateutil==2.8.2
