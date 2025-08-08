@@ -22,7 +22,7 @@ router.register(r'capa_asign', views.CapaViewset, basename='capaasign')
 
 
 urlpatterns = [
-    path("api/posts/", PostResampleView.as_view(), name="post-resample"),
+    path("posts/", PostResampleView.as_view(), name="post-resample"),
     path('online/', views.OnlineView.as_view(), name = 'test'),
     path('asign/',views.asign_node, name='asign'),
     path('capa/',views.asign_capa, name='capa'),
