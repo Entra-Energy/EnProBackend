@@ -108,7 +108,7 @@ def resample_today_task(device_id=None, interval='15min'):
     for dev_id in df['devId'].unique():
         dev_df = df[df['devId'] == dev_id].set_index('created')
         dev_df = dev_df[['value']].resample(interval).mean()
-        dev_df = dev_df.reindex(time_axis).fillna(None)
+        dev_df = dev_df.reindex(time_axis)
 
         for ts, row in dev_df.iterrows():
             result.append({
