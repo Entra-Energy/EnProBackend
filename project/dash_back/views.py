@@ -175,6 +175,29 @@ class PostViewset(viewsets.ModelViewSet):
     serializer_class = PostSerializer
 
 
+class PostResampleView(APIView):
+    def get(self, request, *args, **kwargs):
+        device = request.query_params.get("dev")
+        resample = request.query_params.get("resample")
+        date_range = request.query_params.get("date_range")
+
+        if date_range == "today" and resample:
+            cache_key = f"resampled_today:{device or 'all'}:{resample}"
+            cached = cache.get(cache_key)
+
+            if cached:
+                return Response(cached, status=status.HTTP_200_OK)
+
+            # Trigger async task
+            resample_today_data.delay(device_id=device, interval=resample)
+            return Response(
+                {"detail": "Resampling in progress, try again shortly."},
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        return Response({"error": "Missing or invalid parameters."}, status=400)
+
+
 
 class PostForecastViewset(viewsets.ModelViewSet):
     def get_queryset(self):
