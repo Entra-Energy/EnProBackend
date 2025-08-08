@@ -9,6 +9,7 @@ from django.urls import path
 app_name = "dash_back"
 router = DefaultRouter()
 #
+router.register(r'posts', views.PostViewset, basename='posts')
 router.register(r'price', views.PriceViewset, basename='price')
 router.register(r'post_forecast', views.PostForecastViewset, basename='postForecast')
 router.register(r'month_post_forecast', views.PostForecastMonthViewset, basename='postForecastMonth')
@@ -26,7 +27,6 @@ urlpatterns = [
     path('forecast_today/',views.forecast_today, name='forecast_today'),
     #aggregate min, max, avg
     path('aggregate/', views.MinMaxAvg.as_view(), name='today_avg_value'),   
-
     
 ]
 
