@@ -147,7 +147,7 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=17, minute=18),
     },
     'resample_today_all_devices': {
-        'task': 'dash_back.tasks.resample_today_data',
+        'task': 'dash_back.tasks.resample_range_data',
         'schedule': crontab(minute='*/5'),  # every 5 minutes
         'args': [],  # no device_id = resample for all devices
         'kwargs': {
