@@ -26,6 +26,7 @@ import logging
 logger = logging.getLogger(__name__)
 import subprocess
 from collections import defaultdict
+from typing import Optional
 
      
 
@@ -96,7 +97,7 @@ def _range_bounds(date_range: str):
 
 
                             
-def resample_range_task(date_range: str, device_id: str | None = None, interval: str = "15min"):
+def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
     """
     Resamples Post data for today/month/year and caches the result.
     """

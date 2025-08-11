@@ -11,6 +11,7 @@ from datetime import datetime,tzinfo,timedelta
 from datetime import date
 import json
 import pytz
+from typing import Optional
 
 
 
@@ -31,7 +32,7 @@ def task_command_run():
 
 
 @shared_task()
-def resample_range_data(date_range: str, device_id: str | None = None, interval: str = "15min"):
+def resample_range_data(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
     resample_range_task(date_range, device_id, interval)
     
 
