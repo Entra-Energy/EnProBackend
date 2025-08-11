@@ -3,7 +3,7 @@
 from celery.utils.log import get_task_logger # type: ignore
 from celery import shared_task #type: ignore
 
-from dash_back.utils import timeSet, manage_comm, resample_today_task
+from dash_back.utils import timeSet, manage_comm, resample_range_task
     
 from dash_back.models import Post
 import paho.mqtt.publish as publish
@@ -31,8 +31,8 @@ def task_command_run():
 
 
 @shared_task()
-def resample_today_data(device_id=None, interval='15min'):
-    resample_today_task(device_id, interval)
+def resample_range_data(date_range: str, device_id: str | None = None, interval: str = "15min"):
+    resample_range_task(date_range, device_id, interval)
     
 
 

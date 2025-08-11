@@ -21,12 +21,11 @@ import csv
 from django.db.models import Avg, Max, Count
 import calendar
 from django.core.cache import cache
-from django.utils.timezone import now
+from django.utils.timezone import now, localtime
 import logging
 logger = logging.getLogger(__name__)
 import subprocess
 from collections import defaultdict
-
 
      
 
@@ -71,57 +70,69 @@ def manage_comm():
         # print("CALLING THE CRAWLER:")        
         # management.call_command('crawl')    
     
-    
+
+def _range_bounds(date_range: str):
+    """
+    Return (start_utc, end_utc) for the requested range.
+    start is aligned to local midnight/month/year using Django's timezone.
+    end is now() in UTC.
+    """
+    utc_now = now()
+    local_now = localtime(utc_now)  # Convert to current timezone in settings
+
+    # Start of today in local time
+    start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if date_range == "month":
+        start_local = start_local.replace(day=1)
+    elif date_range == "year":
+        start_local = start_local.replace(month=1, day=1)
+    elif date_range != "today":
+        raise ValueError(f"Unsupported date_range: {date_range}")
+
+    # Convert start back to UTC
+    start_utc = start_local.astimezone(tz=None)
+    return start_utc, utc_now
+
 
                             
-def resample_today_task(device_id=None, interval='15min'):
+def resample_range_task(date_range: str, device_id: str | None = None, interval: str = "15min"):
     """
-    Resamples today's Post data to the given interval and caches the result.
+    Resamples Post data for today/month/year and caches the result.
     """
-    # Define the timezone-aware start and end for today (e.g. Europe/Sofia)
-    today = now().astimezone().date()
-    tomorrow = today + timedelta(days=1)
-    start_time = f"{today}T00:00:00Z"
-    end_time = f"{tomorrow}T00:00:00Z"
+    start_utc, end_utc = _range_bounds(date_range)
 
-    # Filter Post objects
-    qs = Post.objects.filter(created_date__gte=start_time, created_date__lt=end_time)
+    qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
     if device_id:
         qs = qs.filter(devId=device_id)
 
-    qs = qs.values('devId', 'created_date', 'value')
-
-    # Convert queryset to DataFrame
+    qs = qs.values("devId", "created_date", "value")
     df = pd.DataFrame(list(qs))
     if df.empty:
-        return []
+        cache.set(f"resampled_{date_range}:{device_id or 'all'}:{interval}", {}, timeout=60 * 5)
+        return {}
 
-    df['created'] = pd.to_datetime(df['created_date'])
-    df.drop(columns='created_date', inplace=True)
+    df["created"] = pd.to_datetime(df["created_date"], utc=True)
+    df.drop(columns="created_date", inplace=True)
 
-    # Generate a unified time axis
-    min_time = df['created'].min().floor(interval)
-    max_time = df['created'].max().ceil(interval)
-    time_axis = pd.date_range(start=min_time, end=max_time, freq=interval)
+    min_time = df["created"].min().floor(interval)
+    max_time = df["created"].max().ceil(interval)
+    time_axis = pd.date_range(start=min_time, end=max_time, freq=interval, tz="UTC")
 
-    # Resample and pad each device
     result = defaultdict(list)
-    for dev_id in df['devId'].unique():
-        dev_df = df[df['devId'] == dev_id].set_index('created')
-        dev_df = dev_df[['value']].resample(interval).mean()
-        dev_df = dev_df.reindex(time_axis)
-
+    for dev_id in df["devId"].unique():
+        dev_df = (
+            df[df["devId"] == dev_id]
+            .set_index("created")[["value"]]
+            .resample(interval)
+            .mean()
+            .reindex(time_axis)
+        )
         for ts, row in dev_df.iterrows():
-            result[dev_id].append([
-            ts.isoformat(),
-            None if pd.isna(row['value']) else round(row['value'], 2)
-        ])
+            result[dev_id].append([ts.isoformat(), None if pd.isna(row["value"]) else round(row["value"], 2)])
 
-    # Store result in cache
-    cache_key = f"resampled_today:{device_id or 'all'}:{interval}"
-    cache.set(cache_key, result, timeout=60 * 15)  # Cache for 15 minutes
-
+    ttl = 60 * 15 if date_range == "today" else 60 * 30
+    cache.set(f"resampled_{date_range}:{device_id or 'all'}:{interval}", dict(result), timeout=ttl)
     return dict(result)
-
 
 

@@ -8,7 +8,7 @@ from dash_back.serializers import PostSerializer, OnlineSerializer, PriceSeriali
 from dash_back.models import Post, Online, Price, Flexi, FlexabilitySim, Aris, UserIp, PostForecast, GridAsign, CapaAsign, PostForecastMonth, PostConsistency
 from datetime import datetime, timedelta
 from dash_back.custom_filters import PriceFilter, ArisFilter
-from dash_back.tasks import resample_today_data
+from dash_back.tasks import resample_range_data
 import paho.mqtt.publish as publish
 import time
 import datetime as dt
@@ -181,19 +181,14 @@ class PostResampleView(APIView):
         resample = request.query_params.get("resample")
         date_range = request.query_params.get("date_range")
 
-        if date_range == "today" and resample:
-            cache_key = f"resampled_today:{device or 'all'}:{resample}"
+        if date_range in {"today", "month", "year"} and resample:
+            cache_key = f"resampled_{date_range}:{device or 'all'}:{resample}"
             cached = cache.get(cache_key)
-
-            if cached:
+            if cached is not None:
                 return Response(cached, status=status.HTTP_200_OK)
 
-            # Trigger async task
-            resample_today_data.delay(device_id=device, interval=resample)
-            return Response(
-                {"detail": "Resampling in progress, try again shortly."},
-                status=status.HTTP_202_ACCEPTED,
-            )
+            resample_range_data.delay(date_range=date_range, device_id=device, interval=resample)
+            return Response({"detail": "Resampling in progress, try again shortly."}, status=status.HTTP_202_ACCEPTED)
 
         return Response({"error": "Missing or invalid parameters."}, status=400)
 
