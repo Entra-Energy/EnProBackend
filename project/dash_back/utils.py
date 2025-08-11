@@ -74,16 +74,12 @@ def manage_comm():
 
 def _range_bounds(date_range: str):
     """
-    Return (start_utc, end_utc) for the requested range.
-    start is aligned to local midnight/month/year using Django's timezone.
-    end is now() in UTC.
+    Return (start_utc, end_utc) aligned to local midnight/month/year using Django's TIME_ZONE.
     """
     utc_now = now()
-    local_now = localtime(utc_now)  # Convert to current timezone in settings
+    local_now = localtime(utc_now)  # respects settings.TIME_ZONE
 
-    # Start of today in local time
     start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-
     if date_range == "month":
         start_local = start_local.replace(day=1)
     elif date_range == "year":
@@ -91,16 +87,27 @@ def _range_bounds(date_range: str):
     elif date_range != "today":
         raise ValueError(f"Unsupported date_range: {date_range}")
 
-    # Convert start back to UTC
-    start_utc = start_local.astimezone(tz=None)
+    start_utc = start_local.astimezone(tz=None)  # back to UTC
     return start_utc, utc_now
 
+def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
+    if date_range == "month":
+        return "1H"
+    if date_range == "year":
+        return "1D"
+    # today
+    return requested or "15min"
 
-                            
+# @shared_task if you use Celery
 def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
     """
     Resamples Post data for today/month/year and caches the result.
+    - month: 1H
+    - year: 1D
     """
+    # enforce interval policy
+    interval = _normalized_interval(date_range, interval)
+
     start_utc, end_utc = _range_bounds(date_range)
 
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
@@ -109,18 +116,22 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
 
     qs = qs.values("devId", "created_date", "value")
     df = pd.DataFrame(list(qs))
+    cache_key = f"resampled_{date_range}:{device_id or 'all'}:{interval}"
+
     if df.empty:
-        cache.set(f"resampled_{date_range}:{device_id or 'all'}:{interval}", {}, timeout=60 * 5)
+        cache.set(cache_key, {}, timeout=60 * 5)
         return {}
 
     df["created"] = pd.to_datetime(df["created_date"], utc=True)
     df.drop(columns="created_date", inplace=True)
 
+    # Build time axis in UTC aligned to the normalized interval
     min_time = df["created"].min().floor(interval)
     max_time = df["created"].max().ceil(interval)
     time_axis = pd.date_range(start=min_time, end=max_time, freq=interval, tz="UTC")
 
     result = defaultdict(list)
+    # Resample per device
     for dev_id in df["devId"].unique():
         dev_df = (
             df[df["devId"] == dev_id]
@@ -130,10 +141,9 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
             .reindex(time_axis)
         )
         for ts, row in dev_df.iterrows():
-            result[dev_id].append([ts.isoformat(), None if pd.isna(row["value"]) else round(row["value"], 2)])
+            v = row["value"]
+            result[dev_id].append([ts.isoformat(), None if pd.isna(v) else round(float(v), 2)])
 
     ttl = 60 * 15 if date_range == "today" else 60 * 30
-    cache.set(f"resampled_{date_range}:{device_id or 'all'}:{interval}", dict(result), timeout=ttl)
+    cache.set(cache_key, dict(result), timeout=ttl)
     return dict(result)
-
-

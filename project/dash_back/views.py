@@ -143,7 +143,7 @@ class PostViewset(viewsets.ModelViewSet):
                 if cached:
                     return cached
                 else:
-                    resample_today_data.delay(device_id=device, interval=resample)
+                    #resample_today_data.delay(device_id=device, interval=resample)
                     return []  # Or HTTP 202 Accepted
 
             if date_range == 'year':
@@ -180,17 +180,27 @@ class PostResampleView(APIView):
         device = request.query_params.get("dev")
         resample = request.query_params.get("resample")
         date_range = request.query_params.get("date_range")
+        requested_interval = request.query_params.get("resample")  # may be ignored for month/year
 
-        if date_range in {"today", "month", "year"} and resample:
-            cache_key = f"resampled_{date_range}:{device or 'all'}:{resample}"
-            cached = cache.get(cache_key)
-            if cached is not None:
-                return Response(cached, status=status.HTTP_200_OK)
+        if date_range not in {"today", "month", "year"}:
+            return Response({"error": "Invalid date_range"}, status=400)
+        
+        # mirror the task’s normalization so cache keys match
+        interval_for_cache = (
+            "1H" if date_range == "month"
+            else "1D" if date_range == "year"
+            else (requested_interval or "15min")
+        )
 
-            resample_range_data.delay(date_range=date_range, device_id=device, interval=resample)
-            return Response({"detail": "Resampling in progress, try again shortly."}, status=status.HTTP_202_ACCEPTED)
+        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval_for_cache}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached, status=status.HTTP_200_OK)
 
-        return Response({"error": "Missing or invalid parameters."}, status=400)
+        resample_range_data.delay(date_range=date_range, device_id=device, interval=requested_interval or "15min")
+        return Response({"detail": "Resampling in progress, try again shortly."}, status=status.HTTP_202_ACCEPTED)
+
+        
 
 
 
