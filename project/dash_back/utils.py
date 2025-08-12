@@ -73,8 +73,8 @@ def manage_comm():
     
 
 def _range_bounds(date_range: str):
-    utc_now = timezone.now()
-    local_now = timezone.localtime(utc_now)
+    utc_now = now()
+    local_now = localtime(utc_now)
     start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     if date_range == "month":
         start_local = start_local.replace(day=1)
