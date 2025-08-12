@@ -74,9 +74,12 @@ def manage_comm():
         # management.call_command('crawl')    
     
 
+SOFIA_TZ = tz('Europe/Sofia')
+
 def _range_bounds(date_range: str):
     utc_now = dj_timezone.now()
-    local_now = dj_timezone.localtime(utc_now)
+    # make "local" explicitly Sofia, independent of settings.TIME_ZONE
+    local_now = dj_timezone.localtime(utc_now, SOFIA_TZ)
 
     start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     if date_range == "month":
@@ -86,7 +89,7 @@ def _range_bounds(date_range: str):
     elif date_range != "today":
         raise ValueError(f"Unsupported date_range: {date_range}")
 
-    start_utc = start_local.astimezone(dj_timezone.utc)  # explicit UTC
+    start_utc = start_local.astimezone(dj_timezone.utc)
     return start_utc, utc_now
 
 def cache_version_for_today(interval: str) -> str:
@@ -148,8 +151,12 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
             .reindex(time_axis)
         )
         for ts, row in dev_df.iterrows():
+            ts_out = ts.astimezone(SOFIA_TZ)  # convert from UTC to Sofia time
             v = row["value"]
-            result[dev_id].append([ts.isoformat(), None if pd.isna(v) else round(float(v), 2)])
+            result[dev_id].append([
+                ts_out.isoformat(),  # now shows +03:00 in the string
+                None if pd.isna(v) else round(float(v), 2)
+            ])
 
     ttl = 60 * 15 if date_range == "today" else 60 * 30
     cache.set(cache_key, dict(result), timeout=ttl)
