@@ -112,22 +112,23 @@ def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
 
 
 def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
-    """
-    Resamples Post data for today/month/year and caches the result.
-    - month: 1H
-    - year: 1D
-    """
     interval = _normalized_interval(date_range, interval)
     suffix = cache_version_for_today(interval) if date_range == "today" else ""
-    start_utc, end_utc = _range_bounds(date_range)
 
-    # 🔹 Limit "today" to last completed bucket
+    start_utc, _end_now_utc = _range_bounds(date_range)  # we’lloverride end for today below
+
+    # ✅ Compute last COMPLETED boundary in UTC and use it consistently
     if date_range == "today":
-        end_completed = pd.Timestamp(dj_timezone.now()).floor(interval)
-        end_label = end_completed - to_offset(interval)
+        # floor(now) in UTC to resample interval (e.g., 15min)
+        end_completed_utc = pd.Timestamp(dj_timezone.now(), tz=pytz.UTC).floor(interval)
+        # we want to include ONLY completed buckets, so end label is one interval before
+        axis_end_utc = end_completed_utc - to_offset(interval)
+        end_utc = end_completed_utc  # queryset upper bound is [start, end_completed)
     else:
-        end_label = None
+        end_utc = _end_now_utc
+        axis_end_utc = None  # we’ll use max_time from data
 
+    # 🔒 Filter DB with the same upper bound we’ll reflect in the axis
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
     if device_id:
         qs = qs.filter(devId=device_id)
@@ -140,29 +141,34 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
         cache.set(cache_key, {}, timeout=60 * 5)
         return {}
 
+    # ensure UTC, tz-aware
     df["created"] = pd.to_datetime(df["created_date"], utc=True)
     df.drop(columns="created_date", inplace=True)
 
+    # Build axis ONLY up to last completed bucket
     min_time = df["created"].min().floor(interval)
-    max_time = df["created"].max().ceil(interval)
-
-    # 🔹 Choose axis end — for today, drop in-progress bucket
-    axis_end = end_label if end_label is not None else max_time
-
-    time_axis = pd.date_range(start=min_time, end=axis_end, freq=interval, tz="UTC")
+    if axis_end_utc is None:
+        # month/year → include up to latest data
+        max_time = df["created"].max().ceil(interval)
+        axis_end_utc = max_time
+    # Note: axis_end_utc is UTC tz-aware
+    time_axis = pd.date_range(start=min_time, end=axis_end_utc, freq=interval, tz="UTC")
 
     result = defaultdict(list)
     for dev_id in df["devId"].unique():
         dev_df = (
             df[df["devId"] == dev_id]
             .set_index("created")[["value"]]
-            .resample(interval)
+            .resample(interval, label="left", closed="left")   # 👈 explicit
             .mean()
             .reindex(time_axis)
         )
+
+        # OPTIONAL: emit timestamps in local (Bulgaria) time
         for ts, row in dev_df.iterrows():
+            ts_out = ts.astimezone(SOFIA_TZ)  # comment this line to keep UTC
             v = row["value"]
-            result[dev_id].append([ts.isoformat(), None if pd.isna(v) else round(float(v), 2)])
+            result[dev_id].append([ts_out.isoformat(), None if pd.isna(v) else round(float(v), 2)])
 
     ttl = 60 * 15 if date_range == "today" else 60 * 30
     cache.set(cache_key, dict(result), timeout=ttl)
