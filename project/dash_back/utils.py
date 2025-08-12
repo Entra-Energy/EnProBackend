@@ -11,7 +11,9 @@ from django.db.models.functions import TruncHour, TruncMinute
 from django.db.models import Avg, F, ExpressionWrapper, DateTimeField
 import pandas as pd
 import pytz
-from pytz import timezone
+from pytz import timezone as tz
+from django.utils import timezone as dj_timezone
+from django.utils.timezone import now, localtime  # optional: you can keep these if you like
 from django.conf import settings
 import os
 import paho.mqtt.publish as publish
@@ -31,7 +33,7 @@ from typing import Optional
      
 
 def timeSet():
-    now_setTime = datetime.now(timezone('Europe/Sofia'))
+    now_setTime = datetime.now(tz('Europe/Sofia'))
     consum_obj = {
                     'setY': now_setTime.year,
                     'setM': now_setTime.month,
@@ -47,7 +49,7 @@ def timeSet():
 
 def manage_comm():
     # Get the current date in the 'Europe/Sofia' timezone
-    now = datetime.now(timezone('Europe/Sofia'))
+    now = datetime.now(tz('Europe/Sofia'))
   
     tomorrow = now + timedelta(days=1)
 
@@ -73,8 +75,9 @@ def manage_comm():
     
 
 def _range_bounds(date_range: str):
-    utc_now = now()
-    local_now = localtime(utc_now)
+    utc_now = dj_timezone.now()
+    local_now = dj_timezone.localtime(utc_now)
+
     start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     if date_range == "month":
         start_local = start_local.replace(day=1)
@@ -82,13 +85,12 @@ def _range_bounds(date_range: str):
         start_local = start_local.replace(month=1, day=1)
     elif date_range != "today":
         raise ValueError(f"Unsupported date_range: {date_range}")
-    start_utc = start_local.astimezone(timezone.utc)
+
+    start_utc = start_local.astimezone(dj_timezone.utc)  # explicit UTC
     return start_utc, utc_now
 
 def cache_version_for_today(interval: str) -> str:
-    # floor to the current resample bucket in UTC (e.g., 15min)
-    now_utc = timezone.now()
-    # use pandas to floor to the same rule the resampler uses
+    now_utc = dj_timezone.now()
     bucket = pd.Timestamp(now_utc).floor(interval).strftime("%Y%m%dT%H%M")
     return bucket
 
