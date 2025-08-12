@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 import subprocess
 from collections import defaultdict
 from typing import Optional
+from pandas.tseries.frequencies import to_offset
+
 
      
 
@@ -107,18 +109,24 @@ def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
     # today
     return requested or "15min"
 
-# @shared_task if you use Celery
+
+
 def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
     """
     Resamples Post data for today/month/year and caches the result.
     - month: 1H
     - year: 1D
     """
-    # enforce interval policy
     interval = _normalized_interval(date_range, interval)
     suffix = cache_version_for_today(interval) if date_range == "today" else ""
-
     start_utc, end_utc = _range_bounds(date_range)
+
+    # 🔹 Limit "today" to last completed bucket
+    if date_range == "today":
+        end_completed = pd.Timestamp(dj_timezone.now()).floor(interval)
+        end_label = end_completed - to_offset(interval)
+    else:
+        end_label = None
 
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
     if device_id:
@@ -135,13 +143,15 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     df["created"] = pd.to_datetime(df["created_date"], utc=True)
     df.drop(columns="created_date", inplace=True)
 
-    # Build time axis in UTC aligned to the normalized interval
     min_time = df["created"].min().floor(interval)
     max_time = df["created"].max().ceil(interval)
-    time_axis = pd.date_range(start=min_time, end=max_time, freq=interval, tz="UTC")
+
+    # 🔹 Choose axis end — for today, drop in-progress bucket
+    axis_end = end_label if end_label is not None else max_time
+
+    time_axis = pd.date_range(start=min_time, end=axis_end, freq=interval, tz="UTC")
 
     result = defaultdict(list)
-    # Resample per device
     for dev_id in df["devId"].unique():
         dev_df = (
             df[df["devId"] == dev_id]
@@ -151,12 +161,8 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
             .reindex(time_axis)
         )
         for ts, row in dev_df.iterrows():
-            ts_out = ts.astimezone(SOFIA_TZ)  # convert from UTC to Sofia time
             v = row["value"]
-            result[dev_id].append([
-                ts_out.isoformat(),  # now shows +03:00 in the string
-                None if pd.isna(v) else round(float(v), 2)
-            ])
+            result[dev_id].append([ts.isoformat(), None if pd.isna(v) else round(float(v), 2)])
 
     ttl = 60 * 15 if date_range == "today" else 60 * 30
     cache.set(cache_key, dict(result), timeout=ttl)
