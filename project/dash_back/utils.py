@@ -73,12 +73,8 @@ def manage_comm():
     
 
 def _range_bounds(date_range: str):
-    """
-    Return (start_utc, end_utc) aligned to local midnight/month/year using Django's TIME_ZONE.
-    """
-    utc_now = now()
-    local_now = localtime(utc_now)  # respects settings.TIME_ZONE
-
+    utc_now = timezone.now()
+    local_now = timezone.localtime(utc_now)
     start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     if date_range == "month":
         start_local = start_local.replace(day=1)
@@ -86,9 +82,17 @@ def _range_bounds(date_range: str):
         start_local = start_local.replace(month=1, day=1)
     elif date_range != "today":
         raise ValueError(f"Unsupported date_range: {date_range}")
-
-    start_utc = start_local.astimezone(tz=None)  # back to UTC
+    start_utc = start_local.astimezone(timezone.utc)
     return start_utc, utc_now
+
+def cache_version_for_today(interval: str) -> str:
+    # floor to the current resample bucket in UTC (e.g., 15min)
+    now_utc = timezone.now()
+    # use pandas to floor to the same rule the resampler uses
+    bucket = pd.Timestamp(now_utc).floor(interval).strftime("%Y%m%dT%H%M")
+    return bucket
+
+
 
 def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
     if date_range == "month":
@@ -107,6 +111,7 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     """
     # enforce interval policy
     interval = _normalized_interval(date_range, interval)
+    suffix = cache_version_for_today(interval) if date_range == "today" else ""
 
     start_utc, end_utc = _range_bounds(date_range)
 
@@ -116,7 +121,7 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
 
     qs = qs.values("devId", "created_date", "value")
     df = pd.DataFrame(list(qs))
-    cache_key = f"resampled_{date_range}:{device_id or 'all'}:{interval}"
+    cache_key = f"resampled_{date_range}:{device_id or 'all'}:{interval}:{suffix}"
 
     if df.empty:
         cache.set(cache_key, {}, timeout=60 * 5)

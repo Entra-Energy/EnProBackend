@@ -9,6 +9,7 @@ from dash_back.models import Post, Online, Price, Flexi, FlexabilitySim, Aris, U
 from datetime import datetime, timedelta
 from dash_back.custom_filters import PriceFilter, ArisFilter
 from dash_back.tasks import resample_range_data
+from dash_back.utils import cache_version_for_today
 import paho.mqtt.publish as publish
 import time
 import datetime as dt
@@ -191,8 +192,10 @@ class PostResampleView(APIView):
             else "1D" if date_range == "year"
             else (requested_interval or "15min")
         )
+        suffix = cache_version_for_today(interval_for_cache) if date_range == "today" else ""
 
-        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval_for_cache}"
+        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval_for_cache}:{suffix}"
+
         cached = cache.get(cache_key)
         if cached is not None:
             return Response(cached, status=status.HTTP_200_OK)
