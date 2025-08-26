@@ -123,85 +123,116 @@ class MinMaxAvg(APIView):
 
      
 
-class PostViewset(viewsets.ModelViewSet):
-    def get_queryset(self):       
-        date_range = self.request.query_params.get('date_range',None)        
-        device = self.request.query_params.get('dev', None)
-        not_resempled = self.request.query_params.get('not_res', None)
-        on_minute = self.request.query_params.get('on_minute', None)  
-        resample = self.request.query_params.get('resample', None)      
-        today = datetime.today()
-        datem = str(datetime(today.year, today.month, 1))
-        datem = datem.split(" ")[0]
+# class PostViewset(viewsets.ModelViewSet):
+#     def get_queryset(self):       
+#         date_range = self.request.query_params.get('date_range',None)        
+#         device = self.request.query_params.get('dev', None)
+#         not_resempled = self.request.query_params.get('not_res', None)
+#         on_minute = self.request.query_params.get('on_minute', None)  
+#         resample = self.request.query_params.get('resample', None)      
+#         today = datetime.today()
+#         datem = str(datetime(today.year, today.month, 1))
+#         datem = datem.split(" ")[0]
 
-        if date_range is not None:
+#         if date_range is not None:
             
-            if date_range == 'today' and resample:
+#             if date_range == 'today' and resample:
 
-                cache_key = f"resampled_today:{device or 'all'}:{resample}"
-                cached = cache.get(cache_key)
+#                 cache_key = f"resampled_today:{device or 'all'}:{resample}"
+#                 cached = cache.get(cache_key)
 
-                if cached:
-                    return cached
-                else:
-                    #resample_today_data.delay(device_id=device, interval=resample)
-                    return []  # Or HTTP 202 Accepted
+#                 if cached:
+#                     return cached
+#                 else:
+#                     #resample_today_data.delay(device_id=device, interval=resample)
+#                     return []  # Or HTTP 202 Accepted
 
-            if date_range == 'year':
-                errors = Post.objects.filter(created_date__lte='2023-01-01')
-                errors.delete()
-                if device is not None:
-                    if not_resempled:
-                        if on_minute:
-                            queryset = Post.objects.filter(devId=device)
-                        else:
-                            queryset = Post.month.filter(devId=device)
-                    else:
-                        queryset = Post.year.filter(devId=device)
-                else:                    
-                    #queryset = Post.month.all()
-                    queryset = cache.get('cached_data_all_year')
-                return queryset
-            if date_range == 'month':
-                if device is not None:
-                    if not_resempled:
-                        queryset = Post.objects.filter(devId=device,created_date__gte=datem)
-                    else:
-                        queryset = Post.month.filter(devId=device,created__gte=datem)
-                else:
-                    #queryset = Post.month.filter(created__gte=datem)
-                    queryset = cache.get('cached_data_all_month')
+#             if date_range == 'year':
+#                 errors = Post.objects.filter(created_date__lte='2023-01-01')
+#                 errors.delete()
+#                 if device is not None:
+#                     if not_resempled:
+#                         if on_minute:
+#                             queryset = Post.objects.filter(devId=device)
+#                         else:
+#                             queryset = Post.month.filter(devId=device)
+#                     else:
+#                         queryset = Post.year.filter(devId=device)
+#                 else:                    
+#                     #queryset = Post.month.all()
+#                     queryset = cache.get('cached_data_all_year')
+#                 return queryset
+#             if date_range == 'month':
+#                 if device is not None:
+#                     if not_resempled:
+#                         queryset = Post.objects.filter(devId=device,created_date__gte=datem)
+#                     else:
+#                         queryset = Post.month.filter(devId=device,created__gte=datem)
+#                 else:
+#                     #queryset = Post.month.filter(created__gte=datem)
+#                     queryset = cache.get('cached_data_all_month')
                     
-                return queryset  
-    serializer_class = PostSerializer
+#                 return queryset  
+#     serializer_class = PostSerializer
 
 
 class PostResampleView(APIView):
+    VALID_RANGES = {"today", "month", "year"}
+    # Whitelist of safe pandas-style offsets. Add/remove as needed.
+    ALLOWED_INTERVALS = {
+        "15min","1H","1D"
+    }
+
     def get(self, request, *args, **kwargs):
         device = request.query_params.get("dev")
-        resample = request.query_params.get("resample")
         date_range = request.query_params.get("date_range")
-        requested_interval = request.query_params.get("resample")  # may be ignored for month/year
+        interval = (request.query_params.get("resample") or "").strip()
 
-        if date_range not in {"today", "month", "year"}:
+        # Validate date_range
+        if date_range not in self.VALID_RANGES:
             return Response({"error": "Invalid date_range"}, status=400)
-        
-        # mirror the task’s normalization so cache keys match
-        interval_for_cache = (
-            "1H" if date_range == "month"
-            else "1D" if date_range == "year"
-            else (requested_interval or "15min")
-        )
-        suffix = cache_version_for_today(interval_for_cache) if date_range == "today" else ""
 
-        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval_for_cache}:{suffix}"
+        # Default interval if caller didn't provide one
+        if not interval:
+            interval = "15min" if date_range == "today" else ("1H" if date_range == "month" else "1D")
+
+        # Normalize a few common variants (optional)
+        interval = interval.replace(" ", "")
+        if interval.endswith("MIN") or interval.endswith("Min"):
+            interval = interval[:-3] + "min"  # keep 'min' lowercase
+
+        # Validate resample interval
+        if interval not in self.ALLOWED_INTERVALS:
+            return Response(
+                {
+                    "error": "Invalid resample interval",
+                    "allowed": sorted(self.ALLOWED_INTERVALS),
+                },
+                status=400,
+            )
+
+        # Use interval in cache key so different cadences don't collide
+        suffix = cache_version_for_today(interval) if date_range == "today" else ""
+        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval}:{suffix}"
 
         cached = cache.get(cache_key)
         if cached is not None:
             return Response(cached, status=status.HTTP_200_OK)
 
-        resample_range_data.delay(date_range=date_range, device_id=device, interval=requested_interval or "15min")
-        return Response({"detail": "Resampling in progress, try again shortly."}, status=status.HTTP_202_ACCEPTED)
+        # Kick off async job with the chosen interval
+        resample_range_data.delay(
+            date_range=date_range,
+            device_id=device,
+            interval=interval
+        )
+
+        return Response(
+            {
+                "detail": f"Resampling in progress for {date_range} at {interval}.",
+                "cache_key": cache_key,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
         
 
