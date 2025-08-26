@@ -119,8 +119,10 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     suffix = cache_version_for_today(interval) if date_range == "today" else ""
 
     start_utc, end_utc = _range_bounds(date_range)
+    
 
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
+    print(qs)
     if device_id:
         qs = qs.filter(devId=device_id)
 
