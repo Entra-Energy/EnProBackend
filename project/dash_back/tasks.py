@@ -33,7 +33,7 @@ def task_command_run():
 
 @shared_task()
 def resample_range_data(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
-    resample_range_task(date_range, device_id, interval)
+    return resample_range_task(date_range, device_id, interval)
     
 
 

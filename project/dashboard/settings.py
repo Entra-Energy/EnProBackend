@@ -151,6 +151,7 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(minute='*/5'),  # every 5 minutes
         'args': [],  # no device_id = resample for all devices
         'kwargs': {
+            'date_range': 'today',
             'device_id': None,
             'interval': '15min'
         }

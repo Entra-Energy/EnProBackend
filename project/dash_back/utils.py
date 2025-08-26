@@ -92,10 +92,26 @@ def _range_bounds(date_range: str):
     start_utc = start_local.astimezone(dj_timezone.utc)
     return start_utc, utc_now
 
+
+
 def cache_version_for_today(interval: str) -> str:
     now_utc = dj_timezone.now()
     bucket = pd.Timestamp(now_utc).floor(interval).strftime("%Y%m%dT%H%M")
     return bucket
+
+def _get_cache_ttl(date_range: str, interval: str) -> int:
+    """Get appropriate cache TTL based on date range and interval."""
+    if date_range == "today":
+        # Shorter TTL for today's data as it changes frequently
+        if interval in ["15min", "15T"]:
+            return 60 * 10  # 10 minutes
+        elif interval in ["1H", "1h"]:
+            return 60 * 30  # 30 minutes
+        else:  # 1D
+            return 60 * 60  # 1 hour
+    else:
+        # Longer TTL for historical data (month/year)
+        return 60 * 60 * 2  # 2 hours
 
 
 
@@ -107,22 +123,28 @@ def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
     # today
     return requested or "15min"
 
-# @shared_task if you use Celery
+def _normalize_resample_format(resample: str) -> str:
+    """Convert user-friendly resample format to pandas format."""
+    mapping = {
+        "15min": "15min",
+        "1h": "1H", 
+        "1day": "1D"
+    }
+    return mapping.get(resample, resample)
+
+
 def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
     """
     Resamples Post data for today/month/year and caches the result.
-    - month: 1H
-    - year: 1D
+    Uses the provided interval for resampling.
     """
-    # enforce interval policy
-    interval = _normalized_interval(date_range, interval)
     suffix = cache_version_for_today(interval) if date_range == "today" else ""
-
     start_utc, end_utc = _range_bounds(date_range)
     
-
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
-    print(qs)
+    print(f"Query: {qs.query}")
+    print(f"Date range: {start_utc} to {end_utc}, Interval: {interval}")
+    
     if device_id:
         qs = qs.filter(devId=device_id)
 
@@ -137,7 +159,7 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     df["created"] = pd.to_datetime(df["created_date"], utc=True)
     df.drop(columns="created_date", inplace=True)
 
-    # Build time axis in UTC aligned to the normalized interval
+    # Build time axis in UTC aligned to the interval
     min_time = df["created"].min().floor(interval)
     max_time = df["created"].max().ceil(interval)
     time_axis = pd.date_range(start=min_time, end=max_time, freq=interval, tz="UTC")
@@ -160,6 +182,6 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
                 None if pd.isna(v) else round(float(v), 2)
             ])
 
-    ttl = 60 * 15 if date_range == "today" else 60 * 30
+    ttl = _get_cache_ttl(date_range, interval)
     cache.set(cache_key, dict(result), timeout=ttl)
     return dict(result)
