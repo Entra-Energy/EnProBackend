@@ -103,14 +103,37 @@ def cache_version_for_today(interval: str) -> str:
     bucket = pd.Timestamp(now_utc).floor(interval).strftime("%Y%m%dT%H%M")
     return bucket
 
+def validate_interval(interval: str) -> str:
+    """
+    Validate/normalize a pandas offset alias (e.g., '15min', '1H', '1D').
+    Raises ValueError if invalid. Also strips spaces and normalizes the 'min' suffix.
+    """
+    iv = (interval or "").replace(" ", "")
+    if iv.lower().endswith("min"):
+        # keep 'min' lowercase to be consistent in keys
+        n = iv[:-3]
+        iv = f"{n}min"
+    # this will raise if invalid
+    to_offset(iv)
+    return iv
 
 def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
+    """
+    If you want callers to fully control the cadence, prefer 'requested' when provided.
+    Otherwise, fall back to sensible defaults by range.
+    """
+    if requested:
+        return validate_interval(requested)
+    # defaults when caller doesn't specify
     if date_range == "month":
         return "1H"
     if date_range == "year":
         return "1D"
-    # today
-    return requested or "15min"
+    return "15min"  # today default
+
+def make_cache_key(date_range: str, device_id: Optional[str], interval: str) -> str:
+    suffix = cache_version_for_today(interval) if date_range == "today" else ""
+    return f"resampled_{date_range}:{device_id or 'all'}:{interval}:{suffix}"
 
 # --------------------------------------------------------------------
 # Main resampling entry
@@ -126,7 +149,7 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     """
     # Enforce interval policy and build cache key suffix for "today"
     interval = _normalized_interval(date_range, interval)
-    suffix = cache_version_for_today(interval) if date_range == "today" else ""
+    
 
     start_utc, _end_now_utc = _range_bounds(date_range)  # we may override end for "today"
 
@@ -152,7 +175,7 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
 
     qs = qs.values("devId", "created_date", "value")
     df = pd.DataFrame(list(qs))
-    cache_key = f"resampled_{date_range}:{device_id or 'all'}:{interval}:{suffix}"
+    cache_key = make_cache_key(date_range, device_id, interval)
 
     if df.empty:
         cache.set(cache_key, {}, timeout=60 * 5)

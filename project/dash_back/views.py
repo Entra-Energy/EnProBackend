@@ -9,7 +9,9 @@ from dash_back.models import Post, Online, Price, Flexi, FlexabilitySim, Aris, U
 from datetime import datetime, timedelta
 from dash_back.custom_filters import PriceFilter, ArisFilter
 from dash_back.tasks import resample_range_data
-from dash_back.utils import cache_version_for_today
+from dash_back.utils import (
+    _normalized_interval, make_cache_key
+)
 import paho.mqtt.publish as publish
 import time
 import datetime as dt
@@ -178,53 +180,30 @@ class MinMaxAvg(APIView):
 
 class PostResampleView(APIView):
     VALID_RANGES = {"today", "month", "year"}
-    # Whitelist of safe pandas-style offsets. Add/remove as needed.
-    ALLOWED_INTERVALS = {
-        "15min","1H","1D"
-    }
 
     def get(self, request, *args, **kwargs):
         device = request.query_params.get("dev")
         date_range = request.query_params.get("date_range")
-        interval = (request.query_params.get("resample") or "").strip()
+        requested_interval = request.query_params.get("resample")
 
-        # Validate date_range
         if date_range not in self.VALID_RANGES:
             return Response({"error": "Invalid date_range"}, status=400)
 
-        # Default interval if caller didn't provide one
-        if not interval:
-            interval = "15min" if date_range == "today" else ("1H" if date_range == "month" else "1D")
+        # Normalize/validate exactly like the task
+        try:
+            interval = _normalized_interval(date_range, requested_interval)
+        except Exception as e:
+            return Response({"error": f"Invalid resample interval: {requested_interval}", "detail": str(e)}, status=400)
 
-        # Normalize a few common variants (optional)
-        interval = interval.replace(" ", "")
-        if interval.endswith("MIN") or interval.endswith("Min"):
-            interval = interval[:-3] + "min"  # keep 'min' lowercase
-
-        # Validate resample interval
-        if interval not in self.ALLOWED_INTERVALS:
-            return Response(
-                {
-                    "error": "Invalid resample interval",
-                    "allowed": sorted(self.ALLOWED_INTERVALS),
-                },
-                status=400,
-            )
-
-        # Use interval in cache key so different cadences don't collide
-        suffix = cache_version_for_today(interval) if date_range == "today" else ""
-        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval}:{suffix}"
+        # Build the cache key exactly like the task
+        cache_key = make_cache_key(date_range, device, interval)
 
         cached = cache.get(cache_key)
         if cached is not None:
             return Response(cached, status=status.HTTP_200_OK)
 
-        # Kick off async job with the chosen interval
-        resample_range_data.delay(
-            date_range=date_range,
-            device_id=device,
-            interval=interval
-        )
+        # Kick off the job using the *same* interval we used in the cache key
+        resample_range_data.delay(date_range=date_range, device_id=device, interval=interval)
 
         return Response(
             {
@@ -233,7 +212,6 @@ class PostResampleView(APIView):
             },
             status=status.HTTP_202_ACCEPTED,
         )
-
         
 
 
