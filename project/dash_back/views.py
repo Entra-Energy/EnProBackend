@@ -9,7 +9,7 @@ from dash_back.models import Post, Online, Price, Flexi, FlexabilitySim, Aris, U
 from datetime import datetime, timedelta
 from dash_back.custom_filters import PriceFilter, ArisFilter
 from dash_back.tasks import resample_range_data
-from dash_back.utils import cache_version_for_today
+from dash_back.utils import _normalize_resample_format, cache_version_for_today
 import paho.mqtt.publish as publish
 import time
 import datetime as dt
@@ -179,31 +179,33 @@ class MinMaxAvg(APIView):
 class PostResampleView(APIView):
     def get(self, request, *args, **kwargs):
         device = request.query_params.get("dev")
-        resample = request.query_params.get("resample")
+        resample = request.query_params.get("resample", "15min")  # default to 15min
         date_range = request.query_params.get("date_range")
-        requested_interval = request.query_params.get("resample")  # may be ignored for month/year
 
         if date_range not in {"today", "month", "year"}:
             return Response({"error": "Invalid date_range"}, status=400)
         
-        # mirror the task’s normalization so cache keys match
-        interval_for_cache = (
-            "1H" if date_range == "month"
-            else "1D" if date_range == "year"
-            else (requested_interval or "15min")
-        )
-        suffix = cache_version_for_today(interval_for_cache) if date_range == "today" else ""
-
-        cache_key = f"resampled_{date_range}:{device or 'all'}:{interval_for_cache}:{suffix}"
+        # Validate resample parameter
+        if resample not in {"15min", "1h", "1day"}:
+            return Response({"error": "Invalid resample. Must be one of: 15min, 1h, 1day"}, status=400)
+        
+        # Normalize resample format for pandas
+        normalized_resample = _normalize_resample_format(resample)
+        
+        suffix = cache_version_for_today(normalized_resample) if date_range == "today" else ""
+        cache_key = f"resampled_{date_range}:{device or 'all'}:{normalized_resample}:{suffix}"
 
         cached = cache.get(cache_key)
         if cached is not None:
             return Response(cached, status=status.HTTP_200_OK)
 
-        resample_range_data.delay(date_range=date_range, device_id=device, interval=requested_interval or "15min")
+        resample_range_data.delay(
+            date_range=date_range, 
+            device_id=device, 
+            interval=normalized_resample
+        )
         return Response({"detail": "Resampling in progress, try again shortly."}, status=status.HTTP_202_ACCEPTED)
 
-        
 
 
 

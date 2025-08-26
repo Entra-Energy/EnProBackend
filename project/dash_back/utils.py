@@ -76,6 +76,15 @@ def manage_comm():
 
 SOFIA_TZ = tz('Europe/Sofia')
 
+def _normalize_resample_format(resample: str) -> str:
+    """Convert user-friendly resample format to pandas format."""
+    mapping = {
+        "15min": "15min",
+        "1h": "1H", 
+        "1day": "1D"
+    }
+    return mapping.get(resample, resample)
+
 def _range_bounds(date_range: str):
     utc_now = dj_timezone.now()
     # make "local" explicitly Sofia, independent of settings.TIME_ZONE
@@ -91,8 +100,6 @@ def _range_bounds(date_range: str):
 
     start_utc = start_local.astimezone(dj_timezone.utc)
     return start_utc, utc_now
-
-
 
 def cache_version_for_today(interval: str) -> str:
     now_utc = dj_timezone.now()
@@ -112,25 +119,7 @@ def _get_cache_ttl(date_range: str, interval: str) -> int:
     else:
         # Longer TTL for historical data (month/year)
         return 60 * 60 * 2  # 2 hours
-
-
-
-def _normalized_interval(date_range: str, requested: Optional[str]) -> str:
-    if date_range == "month":
-        return "1H"
-    if date_range == "year":
-        return "1D"
-    # today
-    return requested or "15min"
-
-def _normalize_resample_format(resample: str) -> str:
-    """Convert user-friendly resample format to pandas format."""
-    mapping = {
-        "15min": "15min",
-        "1h": "1H", 
-        "1day": "1D"
-    }
-    return mapping.get(resample, resample)
+    
 
 
 def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
@@ -142,7 +131,6 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     start_utc, end_utc = _range_bounds(date_range)
     
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
-    print(f"Query: {qs.query}")
     print(f"Date range: {start_utc} to {end_utc}, Interval: {interval}")
     
     if device_id:
