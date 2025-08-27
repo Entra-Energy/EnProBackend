@@ -127,6 +127,7 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     Resamples Post data for today/month/year and caches the result.
     Uses the provided interval for resampling.
     """
+    norm_interval = _normalize_resample_format(interval)
     suffix = cache_version_for_today(interval) if date_range == "today" else ""
     start_utc, end_utc = _range_bounds(date_range)
     
@@ -147,10 +148,13 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
     df["created"] = pd.to_datetime(df["created_date"], utc=True)
     df.drop(columns="created_date", inplace=True)
 
-    # Build time axis in UTC aligned to the interval
-    min_time = df["created"].min().floor(interval)
-    max_time = df["created"].max().ceil(interval)
-    time_axis = pd.date_range(start=min_time, end=max_time, freq=interval, tz="UTC")
+    now_utc = pd.Timestamp.now(tz="UTC")
+    min_time = df["created"].min().floor(norm_interval)
+    last_complete = min(
+        df["created"].max().floor(norm_interval),
+        now_utc.floor(norm_interval),
+    )
+    time_axis = pd.date_range(start=min_time, end=last_complete, freq=norm_interval, tz="UTC")
 
     result = defaultdict(list)
     # Resample per device
