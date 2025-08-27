@@ -37,8 +37,8 @@ def task_command_run():
 # def resample_range_data(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
 #     return resample_range_task(date_range, device_id, interval)
     
-@shared_task(name="resample.warm_cache_all_devices")
-def warm_cache_all_devices(date_range: str, interval: str):
+@shared_task()
+def resample_range_data(date_range: str, interval: str):
     norm = _normalize_resample_format(interval)
     # single-flight lock for the aggregate key
     suffix = cache_version_for_today(norm) if date_range == "today" else ""
