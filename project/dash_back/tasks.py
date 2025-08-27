@@ -49,7 +49,7 @@ def resample_range_data(date_range: str, device_id: Optional[str] = None, interv
     # choose the target cache key to lock against
     suffix = cache_version_for_today(norm) if date_range == "today" else ""
     target_key = f"resampled_{date_range}:{(device_id or 'all')}:{norm}:{suffix}"
-
+    print(f"Target Key (DEBUG): {target_key}")
     if not _lock(target_key):
         return "busy"
     try:
@@ -61,6 +61,7 @@ def resample_range_data(date_range: str, device_id: Optional[str] = None, interv
         #       resampled_{date_range}:all:{norm}:{suffix}
         #   and (optionally) per-device keys.
         # - when device_id is not None -> computes just that device and writes only its key.
+        
         resample_range_task(
             date_range=date_range,
             device_id=device_id,   # None => all devices; str => single device
