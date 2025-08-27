@@ -4,7 +4,7 @@ from celery.utils.log import get_task_logger # type: ignore
 from celery import shared_task #type: ignore
 
 from dash_back.utils import timeSet, manage_comm, resample_range_task, _normalize_resample_format, cache_version_for_today
-    
+from django.core.cache import cache    
 from dash_back.models import Post
 import paho.mqtt.publish as publish
 from datetime import datetime,tzinfo,timedelta
