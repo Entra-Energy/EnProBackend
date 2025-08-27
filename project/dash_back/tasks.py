@@ -38,21 +38,37 @@ def task_command_run():
 #     return resample_range_task(date_range, device_id, interval)
     
 @shared_task()
-def resample_range_data(date_range: str, interval: str):
+def resample_range_data(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
+    """
+    Warm the cache for a specific device if device_id is provided,
+    otherwise warm the aggregate ("all devices") and (if your helper supports it)
+    also fan out per-device keys.
+    """
     norm = _normalize_resample_format(interval)
-    # single-flight lock for the aggregate key
+
+    # choose the target cache key to lock against
     suffix = cache_version_for_today(norm) if date_range == "today" else ""
-    agg_key = f"resampled_{date_range}:all:{norm}:{suffix}"
-    if not _lock(agg_key):
+    target_key = f"resampled_{date_range}:{(device_id or 'all')}:{norm}:{suffix}"
+
+    if not _lock(target_key):
         return "busy"
     try:
-        # This call computes once and writes:
-        # - aggregate key
-        # - per-device keys
-        resample_range_task(date_range=date_range, device_id=None, interval=norm)
+        # If you want to compute once for all devices and write many cache entries,
+        # call with device_id=None. If you only want to warm one device, pass device_id.
+        #
+        # Assuming your helper `resample_range_task`:
+        # - when device_id=None -> computes ALL devices and writes:
+        #       resampled_{date_range}:all:{norm}:{suffix}
+        #   and (optionally) per-device keys.
+        # - when device_id is not None -> computes just that device and writes only its key.
+        resample_range_task(
+            date_range=date_range,
+            device_id=device_id,   # None => all devices; str => single device
+            interval=norm
+        )
         return "ok"
     finally:
-        _unlock(agg_key)
+        _unlock(target_key)
 
 
 
