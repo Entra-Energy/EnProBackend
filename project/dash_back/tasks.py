@@ -17,7 +17,9 @@ from typing import Optional
 
 logger = get_task_logger(__name__)
 
-
+LOCK_TTL = 60
+def _lock(key): return cache.add(f"lock:{key}", 1, LOCK_TTL)
+def _unlock(key): cache.delete(f"lock:{key}")
     
 
 @shared_task()
@@ -31,11 +33,26 @@ def task_command_run():
     logger.info("managmentCommand")
 
 
-@shared_task()
-def resample_range_data(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
-    return resample_range_task(date_range, device_id, interval)
+# @shared_task()
+# def resample_range_data(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
+#     return resample_range_task(date_range, device_id, interval)
     
-
+@shared_task(name="resample.warm_cache_all_devices")
+def warm_cache_all_devices(date_range: str, interval: str):
+    norm = _normalize_resample_format(interval)
+    # single-flight lock for the aggregate key
+    suffix = cache_version_for_today(norm) if date_range == "today" else ""
+    agg_key = f"resampled_{date_range}:all:{norm}:{suffix}"
+    if not _lock(agg_key):
+        return "busy"
+    try:
+        # This call computes once and writes:
+        # - aggregate key
+        # - per-device keys
+        resample_range_task(date_range=date_range, device_id=None, interval=norm)
+        return "ok"
+    finally:
+        _unlock(agg_key)
 
 
 

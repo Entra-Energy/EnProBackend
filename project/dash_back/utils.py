@@ -123,26 +123,20 @@ def _get_cache_ttl(date_range: str, interval: str) -> int:
 
 
 def resample_range_task(date_range: str, device_id: Optional[str] = None, interval: str = "15min"):
-    """
-    Resamples Post data for today/month/year and caches the result.
-    Uses the provided interval for resampling.
-    """
     norm_interval = _normalize_resample_format(interval)
-    suffix = cache_version_for_today(interval) if date_range == "today" else ""
+    suffix = cache_version_for_today(norm_interval) if date_range == "today" else ""
     start_utc, end_utc = _range_bounds(date_range)
-    
+
     qs = Post.objects.filter(created_date__gte=start_utc, created_date__lt=end_utc)
-    print(f"Date range: {start_utc} to {end_utc}, Interval: {interval}")
-    
     if device_id:
         qs = qs.filter(devId=device_id)
 
-    qs = qs.values("devId", "created_date", "value")
-    df = pd.DataFrame(list(qs))
-    cache_key = f"resampled_{date_range}:{device_id or 'all'}:{interval}:{suffix}"
+    df = pd.DataFrame(list(qs.values("devId", "created_date", "value")))
+    base_key = f"resampled_{date_range}:{{}}:{norm_interval}:{suffix}"
 
     if df.empty:
-        cache.set(cache_key, {}, timeout=60 * 5)
+        # still write empty caches so views are fast
+        cache.set(base_key.format(device_id or "all"), {}, timeout=_get_cache_ttl(date_range, norm_interval))
         return {}
 
     df["created"] = pd.to_datetime(df["created_date"], utc=True)
@@ -150,30 +144,31 @@ def resample_range_task(date_range: str, device_id: Optional[str] = None, interv
 
     now_utc = pd.Timestamp.now(tz="UTC")
     min_time = df["created"].min().floor(norm_interval)
-    last_complete = min(
-        df["created"].max().floor(norm_interval),
-        now_utc.floor(norm_interval),
-    )
+    last_complete = min(df["created"].max().floor(norm_interval), now_utc.floor(norm_interval))
     time_axis = pd.date_range(start=min_time, end=last_complete, freq=norm_interval, tz="UTC")
 
     result = defaultdict(list)
-    # Resample per device
     for dev_id in df["devId"].unique():
         dev_df = (
             df[df["devId"] == dev_id]
             .set_index("created")[["value"]]
-            .resample(interval)
+            .resample(norm_interval)        # use normalized interval here too
             .mean()
             .reindex(time_axis)
         )
         for ts, row in dev_df.iterrows():
-            ts_out = ts.astimezone(SOFIA_TZ)  # convert from UTC to Sofia time
+            ts_out = ts.astimezone(SOFIA_TZ)
             v = row["value"]
-            result[dev_id].append([
-                ts_out.isoformat(),  # now shows +03:00 in the string
-                None if pd.isna(v) else round(float(v), 2)
-            ])
+            result[dev_id].append([ts_out.isoformat(), None if pd.isna(v) else round(float(v), 2)])
 
-    ttl = _get_cache_ttl(date_range, interval)
-    cache.set(cache_key, dict(result), timeout=ttl)
-    return dict(result)
+    ttl = _get_cache_ttl(date_range, norm_interval)
+
+    # 1) cache the aggregate (all devices)
+    cache.set(base_key.format("all"), dict(result), timeout=ttl)
+
+    # 2) cache each device individually
+    for dev_id, series in result.items():
+        cache.set(base_key.format(dev_id), {dev_id: series}, timeout=ttl)
+
+    # If a single device was requested, return just that slice; else return all
+    return {device_id: result[device_id]} if device_id else dict(result)
