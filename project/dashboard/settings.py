@@ -146,11 +146,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'dash_back.tasks.task_command_run',
         'schedule': crontab(hour=17, minute=18),
     },
-    "warm_today_15min_all_devices": {
-        "task": "dash_back.tasks.resample_range_data",
-        "schedule": crontab(minute="0,15,30,45"),
-        "args": ("today", "all", "15min"),
-    },
+    # "warm_today_15min_all_devices": {
+    #     "task": "dash_back.tasks.resample_range_data",
+    #     "schedule": crontab(minute="0,15,30,45"),
+    #     "args": ("today", "all", "15min"),
+    # },
     # 'resample_today_all_devices': {
     #     'task': 'dash_back.tasks.resample_range_data',
     #     'schedule': crontab(minute='*/5'),  # every 5 minutes
