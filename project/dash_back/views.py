@@ -193,7 +193,9 @@ class PostResampleView(APIView):
         normalized_resample = _normalize_resample_format(resample)
         
         suffix = cache_version_for_today(normalized_resample) if date_range == "today" else ""
+        
         cache_key = f"resampled_{date_range}:{device or 'all'}:{normalized_resample}:{suffix}"
+        print("Reading cache:", cache_key)
 
         cached = cache.get(cache_key)
         if cached is not None:
