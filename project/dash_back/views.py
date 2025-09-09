@@ -9,7 +9,7 @@ from dash_back.models import Post, Online, Price, Flexi, FlexabilitySim, Aris, U
 from datetime import datetime, timedelta
 from dash_back.custom_filters import PriceFilter, ArisFilter
 from dash_back.tasks import resample_range_data
-from dash_back.utils import _normalize_resample_format, cache_version_for_today
+from dash_back.utils import _normalize_resample_format, cache_version_for_today, resample_range_task
 import paho.mqtt.publish as publish
 import time
 import datetime as dt
@@ -188,31 +188,24 @@ class PostResampleView(APIView):
         if resample not in {"15min", "1h", "1day"}:
             return Response({"error": "Invalid resample. Must be one of: 15min, 1h, 1day"}, status=400)
         
-        normalized_resample = _normalize_resample_format(resample)
-        suffix = cache_version_for_today(normalized_resample) if date_range == "today" else ""
-        
-        # FIXED: More specific cache key to prevent collisions
-        if device:
-            # Cache key for specific device
-            cache_key = f"resampled_device_{date_range}:{device}:{normalized_resample}:{suffix}"
-        else:
-            # Cache key for ALL devices - completely different pattern
-            cache_key = f"resampled_all_devices_{date_range}:{normalized_resample}:{suffix}"
-        
-        print("Cache key:", cache_key)
-        
-        cached = cache.get(cache_key)
-        if cached is not None:
-            print("Cache HIT")
-            return Response(cached, status=status.HTTP_200_OK)
-        
-        print("Cache MISS - triggering background task")
-        resample_range_data.delay(
-            date_range=date_range, 
-            device_id=device, 
-            interval=normalized_resample
-        )
-        return Response({"detail": "Resampling in progress, try again shortly."}, status=status.HTTP_202_ACCEPTED)
+        try:
+            normalized_resample = _normalize_resample_format(resample)
+            
+            data = resample_range_task(
+                date_range=date_range, 
+                device_id=device, 
+                interval=normalized_resample
+            )
+            
+            # Return with correct status code (200 OK, not 202 ACCEPTED)
+            return Response(data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error in PostResampleView: {str(e)}")
+            return Response(
+                {"error": f"Failed to process data: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 
