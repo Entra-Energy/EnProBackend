@@ -272,9 +272,6 @@ class PostForecastMonthViewset(viewsets.ModelViewSet):
 
 
 
-
-
-
 class  OnlineView(APIView):
     def get(self, request):
         online = Online.dist.all()
